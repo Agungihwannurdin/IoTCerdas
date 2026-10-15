@@ -241,3 +241,17 @@ tbody tr:hover { background: var(--surface-2); }
   padding:11px 15px; margin:0 0 20px; font-size:12px; line-height:1.65; }
 .data-source-note strong { color:var(--ink); }
 @media (max-width:740px) { .channel-pill { max-width:100%; white-space:normal; } }
+
+/* Edge analysis: raw vs validated vs hourly ESP32 */
+:root { --hour-line: #a57df5; }
+.key.key-dashed { border-top: 2px dashed var(--muted); }
+.key.key-hour { border-top: 3px solid var(--hour-line); }
+.hourly-card { margin-bottom: 24px; }
+.hour-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 13px; }
+.hour-metric { display: grid; gap: 8px; border: 1px solid var(--border); border-top: 3px solid var(--metric-color); border-radius: 13px; padding: 15px; background: var(--surface-2); min-width: 0; }
+.hour-metric > span { color: var(--ink2); font-weight: 650; font-size: 12px; }
+.hour-metric > strong { font-size: clamp(20px,2vw,26px); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.hour-metric small { font-size: 11px; color: var(--muted); }
+.hourly-card > p { margin-top: 14px; }
+@media (max-width: 850px) { .hour-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 390px) { .hour-metric { padding: 10px; } }

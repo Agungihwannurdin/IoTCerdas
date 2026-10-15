@@ -94,7 +94,60 @@
     const fl = i => Number(f['field' + i] || 0) | 0;
     return { t: Math.round(epochUTC) + 7 * 3600,
       v: [1, 2, 3, 4].map(i => { const x = val(i); return x === null || !Number.isFinite(x) ? null : x; }),
-      f: [5, 6, 7, 8].map(fl) };
+      f: [5, 6, 7, 8].map(fl), h: parseHourlyStatus(f.status) };
+  }
+  // Format status dikirim oleh firmware pada slot pertama setelah jam berganti.
+  // contoh: indoor|H1|1792112400|15|510.11|41.52|27.88|61.20
+  function parseHourlyStatus(status) {
+    if (typeof status !== 'string') return null;
+    const p = status.split('|');
+    if (p.length !== 8 || p[1] !== 'H1') return null;
+    const t = Number(p[2]), mask = Number(p[3]);
+    if (!Number.isSafeInteger(t) || t < 1000000000 || !Number.isInteger(mask) || mask < 0 || mask > 15) return null;
+    const v = p.slice(4).map((x, i) => {
+      if (!(mask & (1 << i)) || x === '-') return null;
+      const n = Number(x); return x !== '' && Number.isFinite(n) ? n : null;
+    });
+    return { t, mask, v };
+  }
+  function parseHourlyCsv(text) {
+    const out = [];
+    let hasHeader = false;
+    for (const line of text.split(/\r?\n/)) {
+      const s = line.trim();
+      if (s.startsWith('epoch_awal,')) { hasHeader = true; continue; }
+      if (!hasHeader || !/^\d{9,11},/.test(s)) continue;
+      const c = s.split(','), t = Number(c[0]), mask = Number(c[5]);
+      if (!Number.isSafeInteger(t) || !Number.isInteger(mask) || mask < 0 || mask > 15) continue;
+      const v = [1, 2, 3, 4].map((i, k) => {
+        if (!(mask & (1 << k)) || c[i] === '') return null;
+        const n = Number(c[i]); return Number.isFinite(n) ? n : null;
+      });
+      out.push({ t, mask, v });
+    }
+    return out;
+  }
+  // Demo hanya untuk presentasi: agregasi 30 sampel per jam dengan aturan 23 valid.
+  function demoHourly(rows) {
+    const groups = new Map();
+    const latest = rows.length ? rows[rows.length - 1].t : 0;
+    for (const r of rows) {
+      const t = Math.floor(r.t / 3600) * 3600;
+      if (t + 3600 > latest) continue; // jangan tampilkan jam yang belum selesai
+      if (!groups.has(t)) groups.set(t, { t, sum: [0,0,0,0], n: [0,0,0,0] });
+      const g = groups.get(t);
+      for (let k = 0; k < 4; k++) if (r.f[k] === 0 && r.v[k] !== null) { g.sum[k] += r.v[k]; g.n[k]++; }
+    }
+    return Array.from(groups.values()).sort((a,b)=>a.t-b.t).map(g => {
+      let mask = 0;
+      const v = g.sum.map((s,k) => { if(g.n[k] >= 23) { mask |= 1 << k; return s/g.n[k]; } return null; });
+      return {t:g.t,mask,v};
+    });
+  }
+  function mergeHourly(rows) {
+    const m = new Map();
+    rows.forEach(h => { if (h && Number.isFinite(h.t)) m.set(h.t, h); });
+    return Array.from(m.values()).sort((a,b)=>a.t-b.t);
   }
   function mergeRows(a) {                                 // urut waktu, buang duplikat
     a.sort((x, y) => x.t - y.t);
@@ -122,7 +175,7 @@
   // ===================================================================
   const LineChart = {
     props: {
-      rows: Array, k: Number, name: String, unit: String, dec: Number, color: String,
+      rows: Array, hourly: { type: Array, default: () => [] }, k: Number, name: String, unit: String, dec: Number, color: String,
       refs: { type: Array, default: () => [] },
       band: { type: Array, default: null },
       domain: Array,
@@ -155,6 +208,32 @@
         const out = [];
         for (let t = Math.ceil(this.t0 / st) * st; t <= this.t1; t += st) out.push(t);
         return out;
+      },
+      rawPath() {
+        let d = '', pen = false, prev = null;
+        for (const r of this.rows) {
+          const v = r.v[this.k];
+          if (v === null || (prev !== null && r.t - prev > 400)) pen = false;
+          if (v === null) { prev = r.t; continue; }
+          // Nilai ekstrim dibatasi area grafik agar skala valid tetap terbaca.
+          d += (pen ? 'L' : 'M') + this.x(r.t).toFixed(1) + ' ' + this.yc(v).toFixed(1);
+          pen = true; prev = r.t;
+        }
+        return d;
+      },
+      hourlyPath() {
+        let d = '', pen = false, prev = null;
+        for (const h of this.hourly) {
+          const v = h.v[this.k];
+          if (v === null || (prev !== null && h.t - prev > 5400)) pen = false;
+          if (v === null) { prev = h.t; continue; }
+          // Plot rerata pada tengah jam pengukuran (awal + 30 menit).
+          const t = h.t + 1800;
+          if (t < this.t0 || t > this.t1) { pen = false; prev = h.t; continue; }
+          d += (pen ? 'L' : 'M') + this.x(t).toFixed(1) + ' ' + this.yc(v).toFixed(1);
+          pen = true; prev = h.t;
+        }
+        return d;
       },
       path() {
         let d = '', pen = false, prev = null;
@@ -239,7 +318,12 @@
             <line v-if="rf.v > yd[0] && rf.v < yd[1]" :x1="pl" :x2="pl + iw" :y1="y(rf.v)" :y2="y(rf.v)" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4"/>
             <text v-if="rf.v > yd[0] && rf.v < yd[1]" :x="pl + iw - 2" :y="y(rf.v) - 4" text-anchor="end">{{ rf.label }}</text>
           </g>
-          <path :d="path" fill="none" :stroke="color" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          <!-- Raw (garis putus), Validated (garis tegas), dan rerata jam ESP32. -->
+          <path :d="rawPath" fill="none" stroke="var(--muted)" stroke-opacity="0.75" stroke-width="1.15" stroke-dasharray="4 4"/>
+          <path :d="path" fill="none" :stroke="color" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round"/>
+          <path :d="hourlyPath" fill="none" stroke="var(--hour-line)" stroke-width="2.6" stroke-linecap="round"/>
+          <circle v-for="h0 in hourly.filter(h0 => h0.v[k] !== null && h0.t + 1800 >= t0 && h0.t + 1800 <= t1)"
+             :key="'h'+h0.t" :cx="x(h0.t + 1800)" :cy="yc(h0.v[k])" r="4" fill="var(--hour-line)" stroke="var(--surface)" stroke-width="1.5"/>
           <template v-if="showDots">
             <circle v-for="r in rows" :key="'d' + r.t" v-show="r.v[k] !== null && r.f[k] === 0" :cx="x(r.t)" :cy="r.v[k] === null ? 0 : y(r.v[k])" r="2.5" :fill="color"/>
           </template>
@@ -255,7 +339,8 @@
         <div v-if="clamped" class="muted small">Titik bertanda di tepi grafik = nilai di luar skala (nilai asli ada di tooltip).</div>
         <div v-if="hv" class="tip" :style="tipStyle">
           <div class="muted small">{{ ft(hv.t) }}</div>
-          <div><span class="key" :style="{ borderColor: color }"></span><span class="v">{{ fmt(hv.v[k]) }}</span> {{ unit }}</div>
+          <div><span class="key" :style="{ borderColor: color }"></span><b>Raw:</b> <span class="v">{{ fmt(hv.v[k]) }}</span> {{ unit }}</div>
+          <div><b>Validated:</b> {{ hv.f[k] === 0 ? fmt(hv.v[k]) : 'NULL (ditolak)' }}</div>
           <div v-if="hv.f[k]" class="f">{{ ftext(hv.f[k]) }}</div>
           <div v-else-if="hv.v[k] === null" class="muted">Tidak ada nilai</div>
         </div>
@@ -291,6 +376,7 @@
         range: +(store('aqms.range') || 1440),
         theme: store('aqms.theme') || 'dark',
         rows: [],
+        hourlyCSV: [],
         meta: {},
         conn: { state: 'idle', msg: '' },
         csvName: '',
@@ -308,6 +394,25 @@
         const t0 = this.lastT - this.range * 60;
         let i = 0; while (i < this.rows.length && this.rows[i].t < t0) i++;
         return this.rows.slice(i);
+      },
+      hourlyAll() {
+        if (this.source === 'csv') return mergeHourly(this.hourlyCSV);
+        if (this.source === 'demo') return demoHourly(this.rows);
+        return mergeHourly(this.rows.map(r => r.h).filter(Boolean));
+      },
+      hourlyWin() {
+        if (!this.rows.length) return [];
+        if (this.range === 0) return this.hourlyAll;
+        const min = this.lastT - this.range * 60;
+        return this.hourlyAll.filter(h => h.t + 3600 >= min && h.t <= this.lastT);
+      },
+      hourlyLatest() {
+        const out = {};
+        KEYS.forEach((key,k) => {
+          const a = this.hourlyAll.filter(h => h.v[k] !== null);
+          out[key] = a.length ? { value: a[a.length-1].v[k], start: a[a.length-1].t } : null;
+        });
+        return out;
       },
       domain() {
         if (!this.win.length) return [0, 1];
@@ -408,7 +513,7 @@
       },
     },
     methods: {
-      fmtNum, flagText, fmtFull, store,
+      fmtNum, flagText, fmtFull, fmtHM, store,
       statusVar(l) { return LEVEL_VAR[l]; },
       setSource(s) { this.source = s; store('aqms.source', s); this.start(); },
       setRange(m) { this.range = m; store('aqms.range', String(m)); },
@@ -418,7 +523,7 @@
       },
       stop() { if (this.timer) clearInterval(this.timer); this.timer = null; },
       start() {
-        this.stop(); this.meta = {}; this.conn = { state: 'idle', msg: '' };
+        this.stop(); this.meta = {}; this.hourlyCSV = []; this.conn = { state: 'idle', msg: '' };
         if (this.source === 'demo') this.startDemo();
         else if (this.source === 'cloud') this.startCloud();
         else { this.rows = []; this.conn = { state: 'idle', msg: 'Pilih berkas m<tanggal>.csv untuk ditampilkan.' }; }
@@ -456,7 +561,7 @@
           const id = this.cloudChannel.trim();
           if (!/^\d+$/.test(id)) throw new Error('Channel ID tidak valid');
           const count = initial ? 1500 : 100;
-          const url = `https://api.thingspeak.com/channels/${id}/feeds.json?results=${count}`;
+          const url = `https://api.thingspeak.com/channels/${id}/feeds.json?results=${count}&days=3`;
           const res = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
           if (!res.ok) throw new Error('HTTP ' + res.status);
           const json = await res.json();
@@ -464,7 +569,7 @@
           this.rows = initial ? mergeRows(add) : mergeRows(this.rows.concat(add)).slice(-2000);
           const last = (json.feeds || []).filter(f => f && f.created_at).slice(-1)[0];
           this.meta = { group: json.channel && json.channel.name,
-            env: last && (last.status === 'indoor' || last.status === 'outdoor') ? last.status : undefined };
+            env: last && typeof last.status === 'string' ? last.status.split('|')[0] : undefined };
           this.conn = this.rows.length
             ? { state: 'ok', msg: `ThingSpeak Channel ${id} · ${this.rows.length} data tersedia (tidak selalu berarti perangkat sedang online)` }
             : { state: 'idle', msg: `ThingSpeak Channel ${id} terbaca, tetapi belum memiliki data. Periksa kiriman firmware ESP32.` };
@@ -476,14 +581,19 @@
       async onFiles(e) {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
-        let all = [];
-        for (const f of files) all = all.concat(parseCsv(await f.text()));
+        let all = [], hours = [];
+        for (const f of files) {
+          const txt = await f.text();
+          all = all.concat(parseCsv(txt));
+          hours = hours.concat(parseHourlyCsv(txt));
+        }
         e.target.value = '';
         this.stop();
         this.source = 'csv'; store('aqms.source', 'csv');
         this.rows = mergeRows(all);
+        this.hourlyCSV = mergeHourly(hours);
         this.csvName = files.map(f => f.name).join(', ');
-        this.conn = this.rows.length ? { state: 'ok', msg: 'Berkas dimuat: ' + this.csvName + ' (' + this.rows.length + ' baris)' }
+        this.conn = this.rows.length ? { state: 'ok', msg: 'Berkas dimuat: ' + this.csvName + ' (' + this.rows.length + ' sampel, ' + this.hourlyCSV.length + ' jam ESP32)' }
                                      : { state: 'error', msg: 'Tidak ada baris data yang dikenali. Pastikan berkas m<tanggal>.csv.' };
       },
     },
@@ -561,11 +671,15 @@
         <span v-if="meta.heap">Heap: <b>{{ Math.round(meta.heap / 1000) }} KB</b></span>
       </div>
 
-      <div class="data-source-note" role="status">
-        <template v-if="source === 'cloud'"><strong>Jalur online:</strong> ESP32 → ThingSpeak → dashboard ini. ESP32 tetap mengirim data secara terpisah ke server tugas RnD BiruLangit. Data diperbarui sekitar 40 detik sekali.</template>
-        <template v-else-if="source === 'demo'"><strong>MODE DEMO — DATA SIMULASI.</strong> Grafik ini hanya contoh untuk presentasi, bukan pembacaan ESP32 atau data aktual ThingSpeak.</template>
-        <template v-else><strong>MODE CSV:</strong> Data berasal dari file yang Anda pilih di perangkat ini, bukan pengiriman cloud real-time.</template>
+
+      <div v-if="source === 'csv'"
+          class="data-source-note"
+          role="status">
+        <strong>MODE CSV:</strong>
+        Pilih file mYYYYMMDD.csv dan hYYYYMMDD.csv
+        untuk menampilkan data pengukuran.
       </div>
+
       <div class="section-title">
         <div><h2>Ringkasan sensor</h2><div class="section-caption">Nilai terakhir yang lolos validasi, diperbarui otomatis sesuai sumber data</div></div>
         <div class="section-tag">{{ win.length }} sampel pada rentang ini</div>
@@ -616,19 +730,46 @@
           <div class="big">{{ fmtNum(stats[k].last, META[k].dec) }}<small>{{ META[k].unit }}</small></div>
           <div class="stats">
             <span>Min <strong>{{ fmtNum(stats[k].min, META[k].dec) }}</strong></span>
-            <span>Rata-rata <strong>{{ fmtNum(stats[k].avg, META[k].dec) }}</strong></span>
+            <span>Rata-rata valid pada grafik <strong>{{ fmtNum(stats[k].avg, META[k].dec) }}</strong></span>
             <span>Maks <strong>{{ fmtNum(stats[k].max, META[k].dec) }}</strong></span>
           </div>
-          <line-chart :rows="win" :k="KEYS.indexOf(k)" :name="META[k].name" :unit="META[k].unit" :dec="META[k].dec" :color="META[k].color" :domain="domain"
+          <line-chart :rows="win" :hourly="hourlyWin" :k="KEYS.indexOf(k)" :name="META[k].name" :unit="META[k].unit" :dec="META[k].dec" :color="META[k].color" :domain="domain"
             :refs="k === 'pm25' ? [{ v: 15.5, label: 'batas baik 15,5' }, { v: 55.4, label: 'batas sedang 55,4' }] : k === 'co2' ? [{ v: 1000, label: 'ventilasi 1000' }] : []"
             :band="k === 'temp' ? [22, 28, 'zona nyaman'] : k === 'rh' ? [40, 70, 'zona nyaman'] : null"></line-chart>
           <div class="legend">
-            <span><span class="key" :style="{ borderColor: META[k].color }"></span>Nilai normal</span>
-            <span><span class="dia"></span>Ditandai (outlier / di luar rentang / sensor gagal)</span>
+            <span><span class="key key-dashed"></span>Raw (nilai asli)</span>
+            <span><span class="key" :style="{ borderColor: META[k].color }"></span>Validated (flag 0)</span>
+            <span><span class="key key-hour"></span>Hourly dari ESP32</span>
+            <span><span class="dia"></span>Flag outlier / tidak valid</span>
           </div>
         </section>
       </div>
 
+      <div class="section-title"><div><h2>Rata rata per Jam</h2><div class="section-caption"></div></div><div class="section-tag">{{ hourlyWin.length }} jam tersedia</div></div>
+      <section class="card hourly-card" aria-label="Ringkasan rata-rata per jam dari ESP32">
+        <div class="hour-grid">
+          <div class="hour-metric" v-for="k in ['temp','rh','co2','pm25']" :key="k" :style="{'--metric-color':META[k].color}">
+            <span>{{ META[k].name }}</span>
+            <strong>{{ hourlyLatest[k] ? fmtNum(hourlyLatest[k].value, META[k].dec) : '–' }} <small>{{ META[k].unit }}</small></strong>
+            <small>{{ hourlyLatest[k] ? 'Jam ' + fmtHM(hourlyLatest[k].start) + '–' + fmtHM(hourlyLatest[k].start+3600) + ' WIB' : 'Belum ada jam lengkap' }}</small>
+          </div>
+        </div>
+        <p class="muted small" v-if="source==='csv' && !hourlyAll.length">Tambahkan berkas hYYYYMMDD.csv dari SPIFFS untuk menampilkan hasil perhitungan jam asli ESP32.</p>
+      </section>
+      <details class="card">
+        <summary>Tabel rata-rata jam ESP32 ({{ hourlyWin.length }} jam)</summary>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Awal jam WIB</th><th>CO₂ (ppm)</th><th>PM2.5 (µg/m³)</th><th>Suhu (°C)</th><th>RH (%)</th><th>Mask valid</th></tr></thead>
+            <tbody>
+              <tr v-for="h in hourlyWin.slice().reverse()" :key="h.t">
+                <td>{{ fmtFull(h.t) }}</td><td>{{ fmtNum(h.v[0],2) }}</td><td>{{ fmtNum(h.v[1],2) }}</td><td>{{ fmtNum(h.v[2],2) }}</td><td>{{ fmtNum(h.v[3],2) }}</td><td>{{ h.mask }}/15</td>
+              </tr>
+              <tr v-if="!hourlyWin.length"><td colspan="6">Belum ada rata-rata jam dari ESP32</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
       <details class="card">
         <summary>Tabel data ({{ tableRows.length }} baris terbaru pada rentang ini)</summary>
         <div class="tablewrap">
@@ -645,11 +786,7 @@
         </div>
       </details>
 
-      <p class="foot">
-        Status dan statistik hanya memakai data tanpa tanda. Ambang bersifat indikatif untuk tugas, bukan penentu resmi:
-        PM2.5 mengikuti rentang kategori ISPU (idealnya rata-rata 24 jam), CO₂ mengikuti acuan umum ventilasi dalam ruang,
-        suhu nyaman 22–28 °C dan kelembapan nyaman 40–70 %. Pada tugas ini CO₂ dan PM2.5 berasal dari simulator.
-      </p><div class="footer-signoff">AQMS KELOMPOK A &nbsp;·&nbsp; ESP32 EDGE COMPUTING &nbsp;·&nbsp; IoT CERDAS</div>
+      <div class="footer-signoff">AQMS KELOMPOK A &nbsp;·&nbsp; ESP32 EDGE COMPUTING &nbsp;·&nbsp; IoT CERDAS</div>
     </div>`,
   };
 
