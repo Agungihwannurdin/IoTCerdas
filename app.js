@@ -295,7 +295,7 @@
         host: store('aqms.host') || '',
         cloudChannel: store('aqms.cloudChannel') || PUBLIC_CHANNEL_ID,
         range: +(store('aqms.range') || 1440),
-        theme: store('aqms.theme') || 'auto',
+        theme: store('aqms.theme') || 'dark',
         rows: [],
         meta: {},
         conn: { state: 'idle', msg: '' },
@@ -531,63 +531,95 @@
     beforeUnmount() { this.stop(); },
     template: `
     <div class="wrap">
-      <div class="top">
-        <div>
-          <h1>Dashboard Kualitas Udara (AQMS)</h1>
-          <div class="sub">ESP32 + SHT31 · CO₂ dan PM2.5 simulasi · monitoring lokal dan cloud (server dosen tetap aktif)</div>
+      <header class="top">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M5 22h6l4-10 6 17 5-12 3 5h4" stroke="white" stroke-width="3.1" stroke-linejoin="round" stroke-linecap="round"/>
+              <circle cx="30" cy="9" r="2.6" fill="white" opacity=".85"/>
+            </svg>
+          </div>
+          <div>
+            <div class="eyebrow">SMART ENVIRONMENT MONITORING <span class="eyebrow-pill">KELOMPOK A</span></div>
+            <h1>Air Quality <em>Intelligence.</em></h1>
+            <div class="sub">Dashboard AQMS · ESP32 + SHT31 · Pemantauan suhu, kelembapan, CO₂ &amp; PM2.5</div>
+          </div>
         </div>
-        <div class="seg" role="group" aria-label="Tema">
-          <button :aria-pressed="theme === 'auto'" @click="setTheme('auto')">Otomatis</button>
-          <button :aria-pressed="theme === 'light'" @click="setTheme('light')">Terang</button>
-          <button :aria-pressed="theme === 'dark'" @click="setTheme('dark')">Gelap</button>
+        <div class="top-side">
+          <div class="system-indicator"><span class="dot" :class="conn.state"></span>{{ conn.state === 'ok' ? 'DATA TERHUBUNG' : conn.state === 'error' ? 'KONEKSI GAGAL' : 'MENUNGGU KONEKSI' }}</div>
+          <div class="theme-control"><div class="seg" role="group" aria-label="Tema">
+            <button :aria-pressed="theme === 'dark'" @click="setTheme('dark')">Gelap</button>
+            <button :aria-pressed="theme === 'light'" @click="setTheme('light')">Terang</button>
+            <button :aria-pressed="theme === 'auto'" @click="setTheme('auto')">Auto</button>
+          </div></div>
         </div>
-      </div>
+      </header>
 
-      <div class="row" role="group" aria-label="Sumber data">
-        <div class="seg">
-          <button :aria-pressed="source === 'cloud'" @click="setSource('cloud')">Cloud ThingSpeak</button>
-          <button :aria-pressed="source === 'esp32'" @click="setSource('esp32')">ESP32 langsung</button>
-          <button :aria-pressed="source === 'csv'" @click="setSource('csv')">Berkas CSV</button>
-          <button :aria-pressed="source === 'demo'" @click="setSource('demo')">Demo</button>
+      <section class="control-panel" aria-label="Pengaturan sumber data dan rentang waktu">
+        <div class="control-group">
+          <div>
+            <span class="control-label">SUMBER DATA</span>
+            <div class="control-inline">
+              <div class="seg" role="group" aria-label="Sumber data">
+                <button :aria-pressed="source === 'cloud'" @click="setSource('cloud')">☁ Cloud ThingSpeak</button>
+                <button :aria-pressed="source === 'esp32'" @click="setSource('esp32')">ESP32 langsung</button>
+                <button :aria-pressed="source === 'csv'" @click="setSource('csv')">Berkas CSV</button>
+                <button :aria-pressed="source === 'demo'" @click="setSource('demo')">Demo</button>
+              </div>
+              <template v-if="source === 'cloud'">
+                <input type="text" inputmode="numeric" v-model="cloudChannel" placeholder="Channel ID ThingSpeak" aria-label="Channel ID ThingSpeak" @keyup.enter="start()">
+                <button class="btn btn-primary" @click="start()">Hubungkan ↗</button>
+                <a v-if="cloudReady" class="btn" :href="'https://thingspeak.com/channels/' + cloudChannel.trim()" target="_blank" rel="noopener">Lihat channel ↗</a>
+              </template>
+              <template v-if="source === 'esp32'">
+                <input type="text" v-model="host" placeholder="IP ESP32, mis. 192.168.1.50" aria-label="Alamat IP ESP32" @keyup.enter="store('aqms.host', host); start()">
+                <button class="btn btn-primary" @click="store('aqms.host', host); start()">Hubungkan ↗</button>
+                <a v-if="hostClean" class="btn" :href="'http://' + hostClean + '/'" target="_blank" rel="noopener">Unduh CSV</a>
+              </template>
+              <label v-if="source === 'csv'" class="btn btn-primary">Pilih berkas CSV
+                <input type="file" accept=".csv,.txt" multiple hidden @change="onFiles">
+              </label>
+            </div>
+          </div>
         </div>
-        <template v-if="source === 'cloud'">
-          <input type="text" inputmode="numeric" v-model="cloudChannel" placeholder="Channel ID ThingSpeak" aria-label="Channel ID ThingSpeak" @keyup.enter="start()">
-          <button class="btn" @click="start()">Hubungkan</button>
-          <a v-if="cloudReady" class="btn" :href="'https://thingspeak.com/channels/' + cloudChannel.trim()" target="_blank" rel="noopener">Lihat Channel</a>
-        </template>
-        <template v-if="source === 'esp32'">
-          <input type="text" v-model="host" placeholder="IP ESP32, mis. 192.168.1.50" aria-label="Alamat IP ESP32" @keyup.enter="store('aqms.host', host); start()">
-          <button class="btn" @click="store('aqms.host', host); start()">Hubungkan</button>
-          <a v-if="hostClean" class="btn" :href="'http://' + hostClean + '/'" target="_blank" rel="noopener">Unduh CSV dari ESP32</a>
-        </template>
-        <label v-if="source === 'csv'" class="btn">Pilih berkas CSV
-          <input type="file" accept=".csv,.txt" multiple hidden @change="onFiles">
-        </label>
-      </div>
-
-      <div class="row" role="group" aria-label="Rentang waktu">
-        <span class="muted small">Rentang:</span>
-        <div class="seg">
-          <button :aria-pressed="range === 60" @click="setRange(60)">1 jam</button>
-          <button :aria-pressed="range === 360" @click="setRange(360)">6 jam</button>
-          <button :aria-pressed="range === 1440" @click="setRange(1440)">24 jam</button>
-          <button :aria-pressed="range === 0" @click="setRange(0)">Semua</button>
+        <div class="control-group range-group">
+          <div>
+            <span class="control-label">RENTANG WAKTU</span>
+            <div class="seg" role="group" aria-label="Rentang waktu">
+              <button :aria-pressed="range === 60" @click="setRange(60)">1 jam</button>
+              <button :aria-pressed="range === 360" @click="setRange(360)">6 jam</button>
+              <button :aria-pressed="range === 1440" @click="setRange(1440)">24 jam</button>
+              <button :aria-pressed="range === 0" @click="setRange(0)">Semua</button>
+            </div>
+          </div>
         </div>
-      </div>
-
+      </section>
       <div class="conn" aria-live="polite">
-        <span><span class="dot" :class="conn.state"></span><b>{{ conn.state === 'ok' ? 'Data tersedia' : conn.state === 'error' ? 'Bermasalah' : 'Menunggu' }}</b> {{ conn.msg }}</span>
-        <span>Data terakhir: <b>{{ lastLabel }}</b></span>
+        <span class="conn-lead"><span class="dot" :class="conn.state"></span><b>{{ conn.state === 'ok' ? 'Data tersedia' : conn.state === 'error' ? 'Bermasalah' : 'Menunggu data' }}</b> · {{ conn.msg }}</span>
+        <span>Terakhir diperbarui: <b>{{ lastLabel }}</b></span>
         <span v-if="meta.env">Mode: <b>{{ meta.env }}</b></span>
-        <span v-if="meta.rssi">WiFi: <b>{{ meta.rssi }} dBm</b></span>
+        <span v-if="meta.rssi">Wi-Fi: <b>{{ meta.rssi }} dBm</b></span>
         <span v-if="uptimeLabel">Uptime: <b>{{ uptimeLabel }}</b></span>
         <span v-if="meta.boot !== undefined">Boot: <b>{{ meta.boot }}</b></span>
         <span v-if="meta.heap">Heap: <b>{{ Math.round(meta.heap / 1000) }} KB</b></span>
       </div>
 
+      <div class="section-title">
+        <div><h2>Ringkasan sensor</h2><div class="section-caption">Nilai terakhir yang lolos validasi, diperbarui otomatis sesuai sumber data</div></div>
+        <div class="section-tag">{{ win.length }} sampel pada rentang ini</div>
+      </div>
+      <div class="metrics-grid">
+        <section v-for="k in ['temp', 'rh', 'co2', 'pm25']" :key="k" class="metric-card" :style="{'--metric-color': META[k].color}" :aria-label="'Ringkasan ' + META[k].name">
+          <div class="metric-head"><span>{{ META[k].name }}</span><span class="metric-ico" aria-hidden="true">{{ {temp:'°', rh:'◌', co2:'◈', pm25:'✳'}[k] }}</span></div>
+          <div class="metric-value">{{ fmtNum(stats[k].last, META[k].dec) }}<small>{{ META[k].unit }}</small></div>
+          <div class="metric-state">{{ statuses[k] ? statuses[k].t : 'Belum ada pembacaan' }}</div>
+          <div class="metric-foot"><span>Rata-rata periode</span><strong>{{ fmtNum(stats[k].avg, META[k].dec) }} {{ META[k].unit }}</strong></div>
+        </section>
+      </div>
+      <div class="section-title"><div><h2>Analisis kondisi udara</h2><div class="section-caption">Ringkasan indikatif dan saran berbasis pembacaan valid</div></div></div>
       <div class="grid2 hero">
         <section class="card hero-card" :style="{ '--lv': overall ? statusVar(overall.l) : 'var(--axis)' }" aria-label="Status udara">
-          <div class="muted small">Status udara saat ini</div>
+          <div class="hero-kicker">◉ STATUS KUALITAS UDARA</div>
           <div v-if="overall" class="hero-label"><status-icon :level="overall.l" :size="30"></status-icon><span>{{ overall.label }}</span></div>
           <div v-else class="hero-label muted">Menunggu data</div>
           <div v-if="overall" class="muted small">{{ overall.basis }}</div>
@@ -600,7 +632,7 @@
           </div>
         </section>
 
-        <section class="card" aria-label="Rekomendasi otomatis">
+        <section class="card recommendations" aria-label="Rekomendasi otomatis">
           <h2>Rekomendasi otomatis</h2>
           <ul class="recs" v-if="recs.length">
             <li class="rec" v-for="r in recs" :key="r.title">
@@ -608,21 +640,22 @@
               <div><div class="t">{{ r.title }}</div><div class="d">{{ r.text }}</div></div>
             </li>
           </ul>
-          <div v-else class="muted">Rekomendasi muncul setelah data masuk.</div>
+          <div v-else class="empty-note">Rekomendasi akan ditampilkan setelah data sensor terhubung.</div>
         </section>
       </div>
 
+      <div class="section-title"><div><h2>Tren parameter sensor</h2><div class="section-caption">Grafik historis, nilai minimum, rata-rata, maksimum &amp; penanda outlier</div></div><div class="section-tag">Waktu WIB · auto refresh</div></div>
       <div class="charts">
-        <section class="card" v-for="k in ['temp', 'rh', 'pm25', 'co2']" :key="k">
+        <section class="card chart-card" v-for="k in ['temp', 'rh', 'pm25', 'co2']" :key="k" :style="{'--metric-color': META[k].color}">
           <div class="chart-head">
             <h2><span class="key" :style="{ borderColor: META[k].color }"></span>{{ META[k].name }}</h2>
             <div class="muted small">{{ META[k].unit }}</div>
           </div>
           <div class="big">{{ fmtNum(stats[k].last, META[k].dec) }}<small>{{ META[k].unit }}</small></div>
           <div class="stats">
-            <span>Min {{ fmtNum(stats[k].min, META[k].dec) }}</span>
-            <span>Rata-rata {{ fmtNum(stats[k].avg, META[k].dec) }}</span>
-            <span>Maks {{ fmtNum(stats[k].max, META[k].dec) }}</span>
+            <span>Min <strong>{{ fmtNum(stats[k].min, META[k].dec) }}</strong></span>
+            <span>Rata-rata <strong>{{ fmtNum(stats[k].avg, META[k].dec) }}</strong></span>
+            <span>Maks <strong>{{ fmtNum(stats[k].max, META[k].dec) }}</strong></span>
           </div>
           <line-chart :rows="win" :k="KEYS.indexOf(k)" :name="META[k].name" :unit="META[k].unit" :dec="META[k].dec" :color="META[k].color" :domain="domain"
             :refs="k === 'pm25' ? [{ v: 15.5, label: 'batas baik 15,5' }, { v: 55.4, label: 'batas sedang 55,4' }] : k === 'co2' ? [{ v: 1000, label: 'ventilasi 1000' }] : []"
@@ -654,7 +687,7 @@
         Status dan statistik hanya memakai data tanpa tanda. Ambang bersifat indikatif untuk tugas, bukan penentu resmi:
         PM2.5 mengikuti rentang kategori ISPU (idealnya rata-rata 24 jam), CO₂ mengikuti acuan umum ventilasi dalam ruang,
         suhu nyaman 22–28 °C dan kelembapan nyaman 40–70 %. Pada tugas ini CO₂ dan PM2.5 berasal dari simulator.
-      </p>
+      </p><div class="footer-signoff">AQMS KELOMPOK A &nbsp;·&nbsp; ESP32 EDGE COMPUTING &nbsp;·&nbsp; IoT CERDAS</div>
     </div>`,
   };
 
