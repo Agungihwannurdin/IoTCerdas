@@ -686,12 +686,11 @@
       <section v-if="source === 'csv'" class="csv-download-grid" aria-label="Unduh data CSV">
         <div class="csv-download-card">
           <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">☁</span><div><strong>CSV ThingSpeak</strong><span class="csv-card-subtitle">Unduh riwayat dari cloud</span></div></div>
-          <p>Field 1–8, waktu pengiriman, flag, dan status H1. Maksimal 8.000 baris terbaru.</p>
           <a v-if="cloudCsvUrl" class="btn btn-primary" :href="cloudCsvUrl" target="_blank" rel="noopener noreferrer">↓ Unduh CSV ThingSpeak</a>
         </div>
         <div class="csv-download-card">
-          <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">▣</span><div><strong>CSV Asli ESP32 (LAN)</strong><span class="csv-card-subtitle">Unduh dari penyimpanan SPIFFS</span></div></div>
-          <p>Laptop/HP harus berada di Wi-Fi yang sama dengan ESP32. Masukkan IP dari Serial Monitor.</p>
+          <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">▣</span><div><strong>CSV Asli ESP32</strong><span class="csv-card-subtitle">Unduh dari penyimpanan SPIFFS</span></div></div>
+          
           <div class="csv-local-controls">
             <label class="sr-only" for="aqms-esp32-ip">Alamat IP lokal ESP32</label>
             <input id="aqms-esp32-ip" type="text" inputmode="decimal" placeholder="192.168.1.100" v-model.trim="esp32Ip" @change="saveEsp32Ip" autocomplete="off" spellcheck="false">
