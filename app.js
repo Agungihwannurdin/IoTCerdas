@@ -84,6 +84,70 @@
     }
     return out;
   }
+  // CSV ekspor ThingSpeak (feeds.csv) memakai created_at + field1..field8 + status.
+  // Parser SPIFFS di atas sengaja tetap terpisah agar format lama tidak berubah.
+  function splitCsvFields(line) {
+    const out = [];
+    let field = '', quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (quoted && line[i + 1] === '"') { field += '"'; i++; }
+        else quoted = !quoted;
+      } else if (ch === ',' && !quoted) {
+        out.push(field); field = '';
+      } else field += ch;
+    }
+    out.push(field);
+    return out;
+  }
+  function parseThingSpeakCsv(text) {
+    const rows = [], hourly = [];
+    let header = null;
+    for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const cells = splitCsvFields(line);
+      if (!header) {
+        const cols = cells.map(x => x.trim().replace(/^\uFEFF/, '').toLowerCase());
+        if (cols.includes('created_at') && cols.includes('field1')) {
+          header = cols;
+        }
+        continue;
+      }
+      const get = key => {
+        const i = header.indexOf(key);
+        return i < 0 ? null : (cells[i] === undefined ? null : cells[i].trim());
+      };
+      const when = get('created_at');
+      if (!when) continue;
+      // ThingSpeak menuliskan UTC ("... UTC" atau ISO "...Z").
+      const iso = /(?:Z|UTC|[+-]\d{2}:?\d{2})$/i.test(when)
+        ? when : when.replace(' ', 'T') + 'Z';
+      const ts = Date.parse(iso);
+      if (!Number.isFinite(ts)) continue;
+      const val = field => {
+        const x = get(field);
+        if (!x || /^(null|nan)$/i.test(x)) return null;
+        const n = Number(x);
+        return Number.isFinite(n) ? n : null;
+      };
+      const f = [5, 6, 7, 8].map(i => {
+        const n = val('field' + i);
+        return n === null ? 0 : (n | 0);
+      });
+      const r = {
+        // Internal dashboard menampilkan jam menggunakan komponen UTC.
+        // Tambahan 7 jam mengubah waktu ThingSpeak UTC ke label WIB.
+        t: Math.round(ts / 1000) + 7 * 3600,
+        v: [1, 2, 3, 4].map(i => val('field' + i)),
+        f,
+      };
+      const h = parseHourlyStatus(get('status'));
+      if (h) hourly.push(h);
+      rows.push(r);
+    }
+    return { rows, hourly };
+  }
   // ThingSpeak timestamp ISO-8601 = waktu UTC nyata. Firmware menyimpan epoch WIB
   // "seolah UTC", jadi tambahkan +7 jam agar grafik/tabel berformat WIB konsisten.
   function rowFromThingSpeak(f) {
@@ -605,8 +669,9 @@
         let all = [], hours = [];
         for (const f of files) {
           const txt = await f.text();
-          all = all.concat(parseCsv(txt));
-          hours = hours.concat(parseHourlyCsv(txt));
+          const cloud = parseThingSpeakCsv(txt);
+          all = all.concat(parseCsv(txt), cloud.rows);
+          hours = hours.concat(parseHourlyCsv(txt), cloud.hourly);
         }
         e.target.value = '';
         this.stop();
@@ -614,8 +679,8 @@
         this.rows = mergeRows(all);
         this.hourlyCSV = mergeHourly(hours);
         this.csvName = files.map(f => f.name).join(', ');
-        this.conn = this.rows.length ? { state: 'ok', msg: 'Berkas dimuat: ' + this.csvName + ' (' + this.rows.length + ' sampel, ' + this.hourlyCSV.length + ' jam ESP32)' }
-                                     : { state: 'error', msg: 'Tidak ada baris data yang dikenali. Pastikan berkas m<tanggal>.csv.' };
+        this.conn = this.rows.length ? { state: 'ok', msg: 'Berkas dimuat: ' + this.csvName + ' (' + this.rows.length + ' sampel, ' + this.hourlyCSV.length + ' ringkasan jam tersedia)' }
+                                     : { state: 'error', msg: 'Format CSV tidak dikenali. Gunakan ekspor ThingSpeak (created_at,field1...) atau CSV ESP32 (epoch,...).' };
       },
     },
     mounted() {
@@ -686,11 +751,12 @@
       <section v-if="source === 'csv'" class="csv-download-grid" aria-label="Unduh data CSV">
         <div class="csv-download-card">
           <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">☁</span><div><strong>CSV ThingSpeak</strong><span class="csv-card-subtitle">Unduh riwayat dari cloud</span></div></div>
+          <p>Field 1–8, waktu pengiriman, flag, dan status H1. Maksimal 8.000 baris terbaru.</p>
           <a v-if="cloudCsvUrl" class="btn btn-primary" :href="cloudCsvUrl" target="_blank" rel="noopener noreferrer">↓ Unduh CSV ThingSpeak</a>
         </div>
         <div class="csv-download-card">
-          <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">▣</span><div><strong>CSV Asli ESP32</strong><span class="csv-card-subtitle">Unduh dari penyimpanan SPIFFS</span></div></div>
-          
+          <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">▣</span><div><strong>CSV Asli ESP32 (LAN)</strong><span class="csv-card-subtitle">Unduh dari penyimpanan SPIFFS</span></div></div>
+          <p>Laptop/HP harus berada di Wi-Fi yang sama dengan ESP32. Masukkan IP dari Serial Monitor.</p>
           <div class="csv-local-controls">
             <label class="sr-only" for="aqms-esp32-ip">Alamat IP lokal ESP32</label>
             <input id="aqms-esp32-ip" type="text" inputmode="decimal" placeholder="192.168.1.100" v-model.trim="esp32Ip" @change="saveEsp32Ip" autocomplete="off" spellcheck="false">
@@ -715,8 +781,7 @@
           class="data-source-note"
           role="status">
         <strong>MODE CSV:</strong>
-        Pilih file mYYYYMMDD.csv dan hYYYYMMDD.csv
-        untuk menampilkan data pengukuran.
+        Pilih CSV ThingSpeak atau file mYYYYMMDD.csv dan hYYYYMMDD.csv dari ESP32.
       </div>
 
       <div class="section-title">
@@ -793,7 +858,7 @@
             <small>{{ hourlyLatest[k] ? 'Jam ' + fmtHM(hourlyLatest[k].start) + '–' + fmtHM(hourlyLatest[k].start+3600) + ' WIB' : 'Belum ada jam lengkap' }}</small>
           </div>
         </div>
-        <p class="muted small" v-if="source==='csv' && !hourlyAll.length">Tambahkan berkas hYYYYMMDD.csv dari SPIFFS untuk menampilkan hasil perhitungan jam asli ESP32.</p>
+        <p class="muted small" v-if="source==='csv' && !hourlyAll.length">Rerata jam tersedia jika CSV berisi status H1 atau Anda juga memilih berkas hYYYYMMDD.csv.</p>
       </section>
       <details class="card">
         <summary>Tabel rata-rata jam ESP32 ({{ hourlyWin.length }} jam)</summary>
