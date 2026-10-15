@@ -373,6 +373,7 @@
       return {
         source: 'cloud',  // Selalu tampilkan monitoring online saat website pertama dibuka
         cloudChannel: PUBLIC_CHANNEL_ID,
+        esp32Ip: store('aqms.esp32Ip') || '', // alamat IP lokal milik ESP32, disimpan di browser ini saja
         range: +(store('aqms.range') || 1440),
         theme: store('aqms.theme') || 'dark',
         rows: [],
@@ -386,6 +387,25 @@
     },
     computed: {
       cloudReady() { return /^[0-9]+$/.test(this.cloudChannel.trim()); },
+      // CSV cloud berisi field 1-8 dan status H1, bukan salinan file SPIFFS asli.
+      // ThingSpeak membatasi API menjadi paling banyak 8000 entri per permintaan.
+      cloudCsvUrl() {
+        const id = this.cloudChannel.trim();
+        return /^\d+$/.test(id)
+          ? `https://api.thingspeak.com/channels/${id}/feeds.csv?results=8000&days=365&status=true`
+          : '';
+      },
+      // Hanya buka halaman LAN ESP32 pada jaringan privat; tidak memakai fetch HTTP
+      // dari situs HTTPS GitHub Pages agar tidak terkena pembatasan mixed content.
+      localEsp32Url() {
+        const ip = this.esp32Ip.trim();
+        if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return '';
+        const x = ip.split('.').map(Number);
+        if (x.some(n => n < 0 || n > 255)) return '';
+        const privateIP = x[0] === 10 || (x[0] === 172 && x[1] >= 16 && x[1] <= 31)
+          || (x[0] === 192 && x[1] === 168);
+        return privateIP ? `http://${ip}/` : '';
+      },
       lastT() { return this.rows.length ? this.rows[this.rows.length - 1].t : 0; },
       refNow() { return this.source === 'cloud' ? Math.floor(Date.now() / 1000) + 7 * 3600 : this.lastT; },
       win() {
@@ -514,6 +534,7 @@
     },
     methods: {
       fmtNum, flagText, fmtFull, fmtHM, store,
+      saveEsp32Ip() { store('aqms.esp32Ip', this.esp32Ip.trim()); },
       statusVar(l) { return LEVEL_VAR[l]; },
       setSource(s) { this.source = s; store('aqms.source', s); this.start(); },
       setRange(m) { this.range = m; store('aqms.range', String(m)); },
@@ -659,6 +680,25 @@
               <button :aria-pressed="range === 0" @click="setRange(0)">Semua</button>
             </div>
           </div>
+        </div>
+      </section>
+      <!-- Akses unduh tersedia khusus pada tab Riwayat CSV. Tanpa tambahan server/cloud. -->
+      <section v-if="source === 'csv'" class="csv-download-grid" aria-label="Unduh data CSV">
+        <div class="csv-download-card">
+          <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">☁</span><div><strong>CSV ThingSpeak</strong><span class="csv-card-subtitle">Unduh riwayat dari cloud</span></div></div>
+          <p>Field 1–8, waktu pengiriman, flag, dan status H1. Maksimal 8.000 baris terbaru.</p>
+          <a v-if="cloudCsvUrl" class="btn btn-primary" :href="cloudCsvUrl" target="_blank" rel="noopener noreferrer">↓ Unduh CSV ThingSpeak</a>
+        </div>
+        <div class="csv-download-card">
+          <div class="csv-download-title"><span class="csv-symbol" aria-hidden="true">▣</span><div><strong>CSV Asli ESP32 (LAN)</strong><span class="csv-card-subtitle">Unduh dari penyimpanan SPIFFS</span></div></div>
+          <p>Laptop/HP harus berada di Wi-Fi yang sama dengan ESP32. Masukkan IP dari Serial Monitor.</p>
+          <div class="csv-local-controls">
+            <label class="sr-only" for="aqms-esp32-ip">Alamat IP lokal ESP32</label>
+            <input id="aqms-esp32-ip" type="text" inputmode="decimal" placeholder="192.168.1.100" v-model.trim="esp32Ip" @change="saveEsp32Ip" autocomplete="off" spellcheck="false">
+            <a v-if="localEsp32Url" class="btn btn-local" :href="localEsp32Url" target="_blank" rel="noopener noreferrer">↗ Buka daftar CSV</a>
+            <span v-else class="btn btn-inactive" aria-disabled="true">↗ Buka daftar CSV</span>
+          </div>
+          <div class="csv-lan-note">File <code>mYYYYMMDD.csv</code> dan <code>hYYYYMMDD.csv</code> dipilih untuk diunduh pada halaman ESP32.</div>
         </div>
       </section>
       <div class="conn" aria-live="polite">
