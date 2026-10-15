@@ -1,13 +1,9 @@
-/* =====================================================================
-   Dashboard AQMS (Vue 3, tanpa build). Buka index.html langsung di browser.
-   Sumber data:
-     - "ESP32 langsung": membaca http://<IP>/api/data dari ESP32 (data yang sama
-       dengan yang dikirim ke server birulangit, karena berasal dari file CSV di SPIFFS)
-     - "Cloud ThingSpeak": membaca feed channel PUBLIK langsung via HTTPS, tanpa laptop aktif
-     - "Berkas CSV"    : memuat m<tanggal>.csv hasil unduhan / DUMP
-     - "Demo"          : data simulasi, untuk mencoba tampilan tanpa perangkat
-   Waktu: epoch di sini adalah jam dinding WIB yang dianggap UTC (sama dengan firmware).
-   ===================================================================== */
+/* Dashboard AQMS Kelompok A — GitHub Pages
+   Tiga mode: Monitoring Online via channel publik ThingSpeak, Berkas CSV, dan Demo.
+   ESP32 mengirim HTTPS sendiri ke ThingSpeak + server tugas RnD BiruLangit.
+   Website tidak membutuhkan password Wi-Fi maupun Write API Key.
+   CO2 dan PM2.5 pada tugas masih berupa simulasi; jangan anggap sebagai sensor fisik.
+*/
 (function () {
   'use strict';
   const { createApp } = Vue;
@@ -15,7 +11,7 @@
   // ---------- parameter ----------
   // CHANNEL ID PUBLIK SAJA (bukan Write API Key). Boleh diisi sebelum upload ke GitHub Pages.
   // Jika dikosongkan, pengunjung perlu memasukkan Channel ID secara manual.
-  const PUBLIC_CHANNEL_ID = '';
+  const PUBLIC_CHANNEL_ID = '3538727';
   const KEYS = ['co2', 'pm25', 'temp', 'rh'];
   const META = {
     co2:  { name: 'CO₂',        unit: 'ppm',   dec: 0, color: 'var(--s-co2)'  },
@@ -289,11 +285,9 @@
   const App = {
     components: { LineChart, StatusIcon },
     data() {
-      const src = store('aqms.source');
       return {
-        source: ['demo', 'esp32', 'csv', 'cloud'].includes(src) ? src : 'cloud',
-        host: store('aqms.host') || '',
-        cloudChannel: store('aqms.cloudChannel') || PUBLIC_CHANNEL_ID,
+        source: 'cloud',  // Selalu tampilkan monitoring online saat website pertama dibuka
+        cloudChannel: PUBLIC_CHANNEL_ID,
         range: +(store('aqms.range') || 1440),
         theme: store('aqms.theme') || 'dark',
         rows: [],
@@ -307,8 +301,7 @@
     computed: {
       cloudReady() { return /^[0-9]+$/.test(this.cloudChannel.trim()); },
       lastT() { return this.rows.length ? this.rows[this.rows.length - 1].t : 0; },
-      refNow() { return (this.source === 'esp32' && this.meta.now) ? this.meta.now :
-        this.source === 'cloud' ? Math.floor(Date.now() / 1000) + 7 * 3600 : this.lastT; },
+      refNow() { return this.source === 'cloud' ? Math.floor(Date.now() / 1000) + 7 * 3600 : this.lastT; },
       win() {
         if (!this.rows.length) return [];
         if (this.range === 0) return this.rows;
@@ -359,7 +352,7 @@
         const out = [], s = this.stats, st = this.statuses;
         const add = (l, title, text) => out.push({ l, title, text });
         if (this.rows.length === 0) return out;
-        if ((this.source === 'esp32' || this.source === 'cloud') && this.ageSec !== null && this.ageSec > 360)
+        if (this.source === 'cloud' && this.ageSec !== null && this.ageSec > 360)
           add(2, 'Data terlambat', 'Data terakhir ' + Math.round(this.ageSec / 60) + ' menit lalu. Periksa WiFi, catu daya, atau apakah perangkat sedang restart.');
         const lastRow = this.rows[this.rows.length - 1];
         if ((lastRow.f[2] & 8) || (lastRow.f[3] & 8))
@@ -404,10 +397,6 @@
         return out;
       },
       tableRows() { return this.win.slice(-50).reverse(); },
-      hostClean() {
-        const h = this.host.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-        return /^[A-Za-z0-9.\-]+(:\d{1,5})?$/.test(h) ? h : '';
-      },
       lastLabel() {
         if (!this.rows.length) return '–';
         const a = this.ageSec;
@@ -431,7 +420,6 @@
       start() {
         this.stop(); this.meta = {}; this.conn = { state: 'idle', msg: '' };
         if (this.source === 'demo') this.startDemo();
-        else if (this.source === 'esp32') this.startEsp();
         else if (this.source === 'cloud') this.startCloud();
         else { this.rows = []; this.conn = { state: 'idle', msg: 'Pilih berkas m<tanggal>.csv untuk ditampilkan.' }; }
       },
@@ -442,37 +430,11 @@
         this.demoSt = { co2: 450, pm: 20 };
         const a = [];
         for (; t <= now; t += 120) a.push(demoRow(t, this.demoSt));
-        this.rows = a; this.conn = { state: 'ok', msg: 'Data simulasi (bergerak cepat: 1 titik tiap 4 detik)' };
+        this.rows = a; this.conn = { state: 'ok', msg: 'DATA SIMULASI untuk demo presentasi · bukan data ESP32 (1 titik tiap 4 detik)' };
         this.timer = setInterval(() => {
           const t2 = this.lastT + 120;
           this.rows = this.rows.concat([demoRow(t2, this.demoSt)]).slice(-1500);
         }, 4000);
-      },
-      // --- ESP32 ---
-      startEsp() {
-        this.rows = [];
-        if (!this.hostClean) { this.conn = { state: 'idle', msg: 'Isi alamat IP ESP32 (lihat Serial Monitor: "[WEB] unduh CSV: http://...").' }; return; }
-        if (location.protocol === 'https:') { this.conn = { state: 'error', msg: 'Halaman ini dibuka lewat https; browser memblokir akses ke ESP32 (http). Buka index.html dari komputer Anda.' }; return; }
-        this.fetchEsp(true);
-        this.timer = setInterval(() => this.fetchEsp(false), 20000);
-      },
-      async fetchEsp(initial) {
-        if (this.busy || !this.hostClean) return;
-        this.busy = true;
-        const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 15000);
-        try {
-          let url = 'http://' + this.hostClean + '/api/data?hours=48';
-          if (!initial && this.lastT) url += '&since=' + this.lastT;
-          const res = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const j = await res.json();
-          const add = (j.rows || []).map(rowFromArray);
-          this.rows = initial ? mergeRows(add) : mergeRows(this.rows.concat(add)).slice(-2000);
-          this.meta = { group: j.group, env: j.env, now: j.now, rssi: j.rssi, heap: j.heap, boot: j.boot, uptime: j.uptime, sd: j.sd };
-          this.conn = { state: 'ok', msg: 'Terhubung ke ' + this.hostClean };
-        } catch (e) {
-          this.conn = { state: 'error', msg: 'Tidak bisa terhubung ke ' + this.hostClean + '. Pastikan satu WiFi dengan ESP32, firmware sudah memuat /api/data, dan IP benar. Mencoba lagi otomatis.' };
-        } finally { clearTimeout(to); this.busy = false; }
       },
       // --- ThingSpeak channel PUBLIK (hanya CHANNEL ID, bukan API key) ---
       startCloud() {
@@ -482,7 +444,6 @@
           this.conn = { state: 'idle', msg: 'Isi CHANNEL ID angka dari ThingSpeak lalu klik Hubungkan.' };
           return;
         }
-        store('aqms.cloudChannel', id);
         this.fetchCloud(true);
         // Tampil terbaru: permintaan kecil (<100 baris), tanpa cache 5 menit ThingSpeak.
         this.timer = setInterval(() => this.fetchCloud(false), 40000);
@@ -504,7 +465,9 @@
           const last = (json.feeds || []).filter(f => f && f.created_at).slice(-1)[0];
           this.meta = { group: json.channel && json.channel.name,
             env: last && (last.status === 'indoor' || last.status === 'outdoor') ? last.status : undefined };
-          this.conn = { state: 'ok', msg: `Cloud ThingSpeak, Channel ${id} (${this.rows.length} record)` };
+          this.conn = this.rows.length
+            ? { state: 'ok', msg: `ThingSpeak Channel ${id} · ${this.rows.length} data tersedia (tidak selalu berarti perangkat sedang online)` }
+            : { state: 'idle', msg: `ThingSpeak Channel ${id} terbaca, tetapi belum memiliki data. Periksa kiriman firmware ESP32.` };
         } catch (e) {
           this.conn = { state: 'error', msg: 'Cloud gagal dibaca: ' + e.message + '. Pastikan Channel ID benar, channel PUBLIC, dan browser online.' };
         } finally { clearTimeout(to); this.busy = false; }
@@ -546,7 +509,7 @@
           </div>
         </div>
         <div class="top-side">
-          <div class="system-indicator"><span class="dot" :class="conn.state"></span>{{ conn.state === 'ok' ? 'DATA TERHUBUNG' : conn.state === 'error' ? 'KONEKSI GAGAL' : 'MENUNGGU KONEKSI' }}</div>
+          <div class="system-indicator"><span class="dot" :class="conn.state"></span>{{ source === 'demo' ? 'DEMO · DATA SIMULASI' : source === 'csv' ? 'MODE BERKAS CSV' : conn.state === 'ok' ? 'DATA CLOUD TERSEDIA' : conn.state === 'error' ? 'CLOUD GAGAL DIBACA' : 'MENUNGGU DATA CLOUD' }}</div>
           <div class="theme-control"><div class="seg" role="group" aria-label="Tema">
             <button :aria-pressed="theme === 'dark'" @click="setTheme('dark')">Gelap</button>
             <button :aria-pressed="theme === 'light'" @click="setTheme('light')">Terang</button>
@@ -561,20 +524,14 @@
             <span class="control-label">SUMBER DATA</span>
             <div class="control-inline">
               <div class="seg" role="group" aria-label="Sumber data">
-                <button :aria-pressed="source === 'cloud'" @click="setSource('cloud')">☁ Cloud ThingSpeak</button>
-                <button :aria-pressed="source === 'esp32'" @click="setSource('esp32')">ESP32 langsung</button>
-                <button :aria-pressed="source === 'csv'" @click="setSource('csv')">Berkas CSV</button>
-                <button :aria-pressed="source === 'demo'" @click="setSource('demo')">Demo</button>
+                <button :aria-pressed="source === 'cloud'" @click="setSource('cloud')">☁ Monitoring Online</button>
+                <button :aria-pressed="source === 'csv'" @click="setSource('csv')">Riwayat CSV</button>
+                <button :aria-pressed="source === 'demo'" @click="setSource('demo')">✦ Demo</button>
               </div>
               <template v-if="source === 'cloud'">
-                <input type="text" inputmode="numeric" v-model="cloudChannel" placeholder="Channel ID ThingSpeak" aria-label="Channel ID ThingSpeak" @keyup.enter="start()">
-                <button class="btn btn-primary" @click="start()">Hubungkan ↗</button>
-                <a v-if="cloudReady" class="btn" :href="'https://thingspeak.com/channels/' + cloudChannel.trim()" target="_blank" rel="noopener">Lihat channel ↗</a>
-              </template>
-              <template v-if="source === 'esp32'">
-                <input type="text" v-model="host" placeholder="IP ESP32, mis. 192.168.1.50" aria-label="Alamat IP ESP32" @keyup.enter="store('aqms.host', host); start()">
-                <button class="btn btn-primary" @click="store('aqms.host', host); start()">Hubungkan ↗</button>
-                <a v-if="hostClean" class="btn" :href="'http://' + hostClean + '/'" target="_blank" rel="noopener">Unduh CSV</a>
+                <span class="channel-pill" title="ID channel publik ThingSpeak">Channel 3538727 · Publik</span>
+                <button class="btn btn-primary" @click="start()">↻ Muat ulang</button>
+                <a class="btn" href="https://thingspeak.com/channels/3538727" target="_blank" rel="noopener noreferrer">Lihat channel ↗</a>
               </template>
               <label v-if="source === 'csv'" class="btn btn-primary">Pilih berkas CSV
                 <input type="file" accept=".csv,.txt" multiple hidden @change="onFiles">
@@ -595,7 +552,7 @@
         </div>
       </section>
       <div class="conn" aria-live="polite">
-        <span class="conn-lead"><span class="dot" :class="conn.state"></span><b>{{ conn.state === 'ok' ? 'Data tersedia' : conn.state === 'error' ? 'Bermasalah' : 'Menunggu data' }}</b> · {{ conn.msg }}</span>
+        <span class="conn-lead"><span class="dot" :class="conn.state"></span><b>{{ source === 'demo' ? 'Simulasi aktif' : source === 'csv' ? 'Data lokal' : conn.state === 'ok' ? 'Data cloud' : conn.state === 'error' ? 'Bermasalah' : 'Menunggu data' }}</b> · {{ conn.msg }}</span>
         <span>Terakhir diperbarui: <b>{{ lastLabel }}</b></span>
         <span v-if="meta.env">Mode: <b>{{ meta.env }}</b></span>
         <span v-if="meta.rssi">Wi-Fi: <b>{{ meta.rssi }} dBm</b></span>
@@ -604,6 +561,11 @@
         <span v-if="meta.heap">Heap: <b>{{ Math.round(meta.heap / 1000) }} KB</b></span>
       </div>
 
+      <div class="data-source-note" role="status">
+        <template v-if="source === 'cloud'"><strong>Jalur online:</strong> ESP32 → ThingSpeak → dashboard ini. ESP32 tetap mengirim data secara terpisah ke server tugas RnD BiruLangit. Data diperbarui sekitar 40 detik sekali.</template>
+        <template v-else-if="source === 'demo'"><strong>MODE DEMO — DATA SIMULASI.</strong> Grafik ini hanya contoh untuk presentasi, bukan pembacaan ESP32 atau data aktual ThingSpeak.</template>
+        <template v-else><strong>MODE CSV:</strong> Data berasal dari file yang Anda pilih di perangkat ini, bukan pengiriman cloud real-time.</template>
+      </div>
       <div class="section-title">
         <div><h2>Ringkasan sensor</h2><div class="section-caption">Nilai terakhir yang lolos validasi, diperbarui otomatis sesuai sumber data</div></div>
         <div class="section-tag">{{ win.length }} sampel pada rentang ini</div>

@@ -233,3 +233,11 @@ tbody tr:hover { background: var(--surface-2); }
 }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { transition-duration: 0s !important; animation-duration: 0s !important; scroll-behavior: auto !important; } }
 @media (forced-colors: active) { .seg button[aria-pressed="true"] { outline: 2px solid; } }
+
+/* Rute sumber data yang disederhanakan: cloud / CSV / demo */
+.channel-pill { color:var(--ink2); padding:9px 12px; border:1px solid var(--border); border-radius:11px;
+  background:var(--surface-2); font-size:12px; font-weight:720; white-space:nowrap; }
+.data-source-note { border:1px solid var(--border); background:var(--surface-2); color:var(--ink2); border-radius:12px;
+  padding:11px 15px; margin:0 0 20px; font-size:12px; line-height:1.65; }
+.data-source-note strong { color:var(--ink); }
+@media (max-width:740px) { .channel-pill { max-width:100%; white-space:normal; } }

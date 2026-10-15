@@ -1,42 +1,31 @@
-# AQMS Kelompok A — Dashboard Modern
+# AQMS Kelompok A — Monitoring Online + CSV + Demo
 
-Versi UI modern (navy/cyan) untuk GitHub Pages. Firmware ESP32 dan server dosen tidak berubah.
+Dashboard GitHub Pages telah disederhanakan menjadi tiga sumber data:
 
-## Cara memperbarui repository `IoTCerdas`
+- **Monitoring Online**: membaca feed publik **ThingSpeak Channel ID `3538727`** melalui HTTPS, refresh setiap ~40 detik. Pembacaan langsung saat website dibuka, tidak memerlukan laptop selalu menyala.
+- **Riwayat CSV**: memilih file `m<dayKey>.csv` dari penyimpanan SPIFFS.
+- **Demo**: simulasi tampilan (bukan data sensor nyata), bergerak setiap ~4 detik.
 
-1. Ekstrak ZIP terlebih dahulu.
-2. Masuk ke repository GitHub `IoTCerdas` > tab **Code**.
-3. Klik **Add file** > **Upload files**, lalu unggah **isi** folder dashboard (bukan ZIP, dan jangan menambah satu level folder). Jika GitHub meminta konfirmasi mengganti berkas bernama sama, setujui penggantian lalu Commit changes.
-4. Pastikan `index.html`, `app.js`, dan `style.css` ada di root repository; `lib/vue.global.prod.js` berada di subfolder `lib`.
-5. Buka kembali halaman GitHub Pages setelah deployment selesai (biasanya beberapa menit), lalu tekan **Ctrl + F5** untuk memuat versi terbaru.
-6. Klik **Demo** untuk menampilkan contoh grafik tanpa ESP32. Ini **bukan** data sensor aktual.
-7. Klik **Cloud ThingSpeak**, isi Channel ID publik, lalu klik **Hubungkan** untuk memantau data ESP32 sebenarnya dari cloud.
+Mode `ESP32 langsung` dari website dihilangkan. Ini tidak mematikan atau menghapus server web yang ada pada firmware ESP32 dan tidak mengubah pengiriman tugas ke server RnD BiruLangit.
 
-Jika repository GitHub menolak mengunggah file dengan nama sama, buka masing-masing berkas di GitHub dan edit/replace kontennya, atau gunakan GitHub Desktop untuk menyalin berkas baru dan Commit + Push.
+## Cara pasang ke repository GitHub `IoTCerdas`
+1. Ekstrak ZIP dashboard ini.
+2. Perbarui `index.html`, `app.js`, dan `style.css` pada root repository `IoTCerdas`. Pastikan subfolder `lib/` beserta Vue.js tetap ada.
+3. Bila pengunggahan nama file yang sama tidak berhasil dari GitHub web, edit file di repository atau gunakan GitHub Desktop untuk mengganti file, Commit dan Push. Jangan menaruh ZIP sebagai satu file di repository.
+4. Tunggu tab **Actions** menunjukkan GitHub Pages berhasil, lalu buka website Anda dan tekan `Ctrl+F5`.
+5. Klik **Demo** untuk memeriksa grafik; klik **Monitoring Online** untuk membaca channel publik ThingSpeak.
 
-## Menampilkan data otomatis untuk setiap pengunjung
+## Konfigurasi / keamanan
+- Channel ID berada pada konstanta `PUBLIC_CHANNEL_ID` di `app.js`, sudah berisi `3538727` (boleh publik).
+- **Jangan taruh `Write API Key`, password Wi-Fi, atau token firmware di file GitHub**. Kunci Write API yang terlihat dalam screenshot sebaiknya segera diganti di ThingSpeak. Setelah diganti, isi Write API Key baru pada firmware ESP32 yang mengirim data cloud, lalu unggah ulang firmware.
+- Dashboard membutuhkan channel ThingSpeak berstatus **Public** agar feed bisa dibaca tanpa Read API Key.
+- ESP32 masih harus menyala dan terhubung internet agar data aktual terus masuk. Menampilkan dashboard tidak membuktikan ESP32 sedang online; periksa waktu record terakhir.
+- CO₂ dan PM2.5 dalam tugas berasal dari simulator, sedangkan SHT31 dibaca secara fisik.
+- Jika data cloud kosong: periksa Field 1–8, status Public, firmware cloud aktif, Write API Key terbaru, Serial Monitor, dan feed channel.
 
-Pada `app.js` baris awal, ubah:
+## Alur arsitektur
 
-```javascript
-const PUBLIC_CHANNEL_ID = '';
-```
+ESP32 (Wi-Fi) ├→ HTTPS server RnD BiruLangit (tugas dosen)
+             └→ HTTPS ThingSpeak → website GitHub Pages
 
-menjadi:
-
-```javascript
-const PUBLIC_CHANNEL_ID = 'ISI_CHANNEL_ID_ANGKA';
-```
-
-Channel harus disetel **Public** di ThingSpeak. **Jangan** mengisi Write API Key atau password Wi-Fi di berkas website publik.
-
-## Fungsi yang dipertahankan
-
-- Cloud ThingSpeak: fetch HTTPS channel publik (refresh sekitar 40 detik)
-- ESP32 langsung: hanya jaringan lokal (tidak melalui GitHub Pages HTTPS)
-- CSV dari SPIFFS dan Demo
-- Grafik suhu, kelembapan, CO₂, PM2.5 dengan outlier dan tooltip
-- Ringkasan min, rata-rata, maks, status udara, rekomendasi otomatis, tabel data
-- Tema gelap/terang/otomatis dan tampilan responsif untuk HP
-
-**Penting:** CO₂ dan PM2.5 dari proyek tugas ini adalah nilai *simulasi*. Status kualitas udara bersifat indikatif untuk demonstrasi tugas, bukan penilaian kesehatan resmi.
+Hosting statis GitHub Pages tidak menyimpan maupun mengirim data sensor sendiri.
