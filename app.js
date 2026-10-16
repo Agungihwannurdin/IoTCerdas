@@ -84,7 +84,7 @@
     }
     return out;
   }
-  // CSV ekspor ThingSpeak (feeds.csv) memakai created_at + field1..field8 + status.
+  // CSV FIX v8 — Impor CSV ThingSpeak + SPIFFS, dengan diagnostik.
   // Parser SPIFFS di atas sengaja tetap terpisah agar format lama tidak berubah.
   function splitCsvFields(line) {
     const out = [];
@@ -104,7 +104,7 @@
   function parseThingSpeakCsv(text) {
     const rows = [], hourly = [];
     let header = null;
-    for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    for (const line of text.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/)) {
       if (!line.trim()) continue;
       const cells = splitCsvFields(line);
       if (!header) {
@@ -121,8 +121,9 @@
       const when = get('created_at');
       if (!when) continue;
       // ThingSpeak menuliskan UTC ("... UTC" atau ISO "...Z").
-      const iso = /(?:Z|UTC|[+-]\d{2}:?\d{2})$/i.test(when)
-        ? when : when.replace(' ', 'T') + 'Z';
+      // Normalisasi timestamp ke ISO 8601 untuk browser yang berbeda.
+      let iso = when.trim().replace(/\s+(?:UTC|GMT)$/i, 'Z').replace(' ', 'T');
+      if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso)) iso += 'Z';
       const ts = Date.parse(iso);
       if (!Number.isFinite(ts)) continue;
       const val = field => {
@@ -147,6 +148,25 @@
       rows.push(r);
     }
     return { rows, hourly };
+  }
+  function explainCsvImport(filesWithContent, hours) {
+    const text = filesWithContent.map(x => x.content).join('\n').replace(/^\uFEFF/, '');
+    const first = text.split(/\r\n|\n|\r/).find(x => x.trim()) || '';
+    const fields = splitCsvFields(first).map(x => x.trim().toLowerCase());
+    const nonEmpty = text.split(/\r\n|\n|\r/).filter(x => x.trim());
+    if (!text.trim()) return 'CSV FIX v8: Berkas kosong. Coba unduh ulang dari ThingSpeak.';
+    if (/<(?:!doctype|html|head|body)\b/i.test(text.slice(0, 400))) {
+      return 'CSV FIX v8: File yang dipilih berisi HTML, bukan CSV. Unduh ulang CSV dari ThingSpeak.';
+    }
+    if (fields.includes('created_at') && fields.includes('field1')) {
+      if (nonEmpty.length === 1) return 'CSV FIX v8: Header ThingSpeak terbaca, tetapi file belum berisi sampel. Periksa channel.';
+      return 'CSV FIX v8: Kolom ThingSpeak ditemukan, tetapi baris atau timestamp belum dikenali. Unggah feeds.csv asli agar dapat saya periksa.';
+    }
+    if (fields.includes('epoch_awal')) {
+      return `CSV FIX v8: File hourly ESP32 dikenali (${hours.length} ringkasan), tetapi tidak berisi sampel dua-menit. Pilih juga mYYYYMMDD.csv.`;
+    }
+    if (fields.includes('epoch')) return 'CSV FIX v8: Header ESP32 ditemukan, tetapi tidak ada baris pengukuran yang valid.';
+    return 'CSV FIX v8: Format belum dikenali. Awal header: ' + fields.slice(0, 6).join(', ').slice(0, 140) + '. Unggah file asli untuk analisis.';
   }
   // ThingSpeak timestamp ISO-8601 = waktu UTC nyata. Firmware menyimpan epoch WIB
   // "seolah UTC", jadi tambahkan +7 jam agar grafik/tabel berformat WIB konsisten.
@@ -611,7 +631,7 @@
         this.stop(); this.meta = {}; this.hourlyCSV = []; this.conn = { state: 'idle', msg: '' };
         if (this.source === 'demo') this.startDemo();
         else if (this.source === 'cloud') this.startCloud();
-        else { this.rows = []; this.conn = { state: 'idle', msg: 'Pilih berkas m<tanggal>.csv untuk ditampilkan.' }; }
+        else { this.rows = []; this.conn = { state: 'idle', msg: 'Pilih file feeds.csv ThingSpeak atau mYYYYMMDD.csv ESP32 untuk ditampilkan.' }; }
       },
       // --- demo ---
       startDemo() {
@@ -666,9 +686,10 @@
       async onFiles(e) {
         const files = Array.from(e.target.files || []);
         if (!files.length) return;
-        let all = [], hours = [];
+        let all = [], hours = [], filesWithContent = [];
         for (const f of files) {
           const txt = await f.text();
+          filesWithContent.push({ name: f.name, content: txt });
           const cloud = parseThingSpeakCsv(txt);
           all = all.concat(parseCsv(txt), cloud.rows);
           hours = hours.concat(parseHourlyCsv(txt), cloud.hourly);
@@ -679,8 +700,8 @@
         this.rows = mergeRows(all);
         this.hourlyCSV = mergeHourly(hours);
         this.csvName = files.map(f => f.name).join(', ');
-        this.conn = this.rows.length ? { state: 'ok', msg: 'Berkas dimuat: ' + this.csvName + ' (' + this.rows.length + ' sampel, ' + this.hourlyCSV.length + ' ringkasan jam tersedia)' }
-                                     : { state: 'error', msg: 'Format CSV tidak dikenali. Gunakan ekspor ThingSpeak (created_at,field1...) atau CSV ESP32 (epoch,...).' };
+        this.conn = this.rows.length ? { state: 'ok', msg: 'CSV FIX v8 · Berkas dimuat: ' + this.csvName + ' (' + this.rows.length + ' sampel, ' + this.hourlyCSV.length + ' ringkasan jam tersedia)' }
+                                     : { state: 'error', msg: explainCsvImport(filesWithContent, this.hourlyCSV) };
       },
     },
     mounted() {

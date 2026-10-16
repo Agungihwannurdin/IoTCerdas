@@ -1,28 +1,15 @@
-# Dashboard AQMS Kelompok A v3 (GitHub Pages)
+# Dashboard AQMS Rev4 — CSV Fix v8
 
-Tiga menu tetap: **Monitoring Online**, **Riwayat CSV**, **Demo**. Grafik membandingkan Raw, Validated, Hourly ESP32. Channel publik ThingSpeak: **3538727**.
+Perbaikan pada ZIP Rev4 yang Anda unggah. Tidak perlu mengganti firmware ESP32.
 
-Untuk unggah: pilih seluruh **isi folder** ini dan letakkan di root repository `IoTCerdas` yang sudah ada, bukan folder pembungkus.
+## Ubah website GitHub Pages
+1. Buka repo GitHub `IoTCerdas`.
+2. Ganti `app.js` dan `index.html` di ROOT repository dengan file baru dari ZIP ini. `style.css` dan folder `lib` tetap bisa digunakan seperti semula.
+3. Commit, tunggu workflow Pages selesai (`Actions`), buka website dan tekan Ctrl+Shift+R atau gunakan tab InPrivate.
+4. Pada Riwayat CSV pilih `feeds.csv` ThingSpeak atau `mYYYYMMDD.csv` ESP32.
+5. Jika gagal, pesan harus diawali **CSV FIX v8**; kirim teks error itu beserta `feeds.csv` asli supaya struktur data dapat diperiksa.
 
-Catatan: data backlog dikirim lewat ThingSpeak Bulk Write dengan timestamp asli WIB (`created_at` menggunakan `+07:00`). Data Hourly ESP32 berada dalam `status` format `indoor|H1|epoch|mask|co2|pm25|temp|rh`.
-
-**Jangan menaruh Write API Key di website atau repository publik.**
-
-
-## Unduh CSV (pembaruan)
-
-Pada menu **Riwayat CSV** sekarang tersedia:
-
-1. **Unduh CSV ThingSpeak:** membuka endpoint publik `https://api.thingspeak.com/channels/3538727/feeds.csv?results=8000&days=365&status=true` untuk maksimal 8.000 entri terbaru dalam 365 hari terakhir. CSV ini berisi Field 1–8 dan status H1 jika tersedia; **bukan** salinan identik CSV asli SPIFFS. Browser dapat menampilkan isi CSV terlebih dahulu; gunakan Save As bila perlu. Unduhan melalui API tidak dipengaruhi pilihan 1/6/24 jam pada grafik.
-2. **CSV Asli ESP32 (LAN):** isi alamat IP lokal ESP32 (contoh `192.168.1.100`) dari Serial Monitor, lalu klik **Buka daftar CSV**. Browser membuka halaman web ESP32 yang disediakan `Web.h`, dengan link `mYYYYMMDD.csv` dan `hYYYYMMDD.csv`. Perangkat pembuka harus berada di jaringan lokal ESP32 yang bisa mengakses IP tersebut. Karena dashboard GitHub Pages HTTPS tidak membaca API HTTP lokal, pengguna diarahkan melalui tautan navigasi, bukan `fetch`.
-3. **Pilih berkas CSV:** buka file dari komputer untuk memvisualisasikannya. Parser dashboard saat ini mengenali format CSV SPIFFS; CSV ekspor ThingSpeak memiliki struktur berbeda sehingga untuk visualisasi gunakan menu Monitoring Online.
-
-**Tidak ada perubahan pada firmware**, server RnD BiruLangit, komunikasi ThingSpeak, tiga mode dashboard, maupun penyimpanan SPIFFS. Akses unduh ESP32 lokal belum menggunakan autentikasi, maka jangan meneruskan port 80 router ke internet. Jangan masukkan Write API Key di GitHub Pages.
-
-
-## Pembaruan parser CSV ThingSpeak
-- Menu Riwayat CSV > Pilih berkas CSV kini menerima hasil ekspor `feeds.csv` ThingSpeak (`created_at`, `field1`...`field8`, `status`).
-- Kolom waktu UTC pada CSV ThingSpeak diubah untuk tampilan WIB (+7 jam), sesuai mode cloud.
-- Field 5–8 dipakai sebagai flag validasi, status `H1` dipakai untuk garis rerata jam jika tersedia.
-- Format SPIFFS `mYYYYMMDD.csv` dan `hYYYYMMDD.csv` tetap didukung.
-- Firmware ESP32 tidak perlu diubah; unggah isi folder dashboard ini ke root repository GitHub Pages.
+## Penting
+- `feeds.csv` ThingSpeak berbeda dengan file CSV asli SPIFFS; keduanya didukung.
+- Jika masih tampil error yang berbunyi `Tidak ada baris data yang dikenali. Pastikan berkas m<tanggal>.csv`, itu berarti browser atau Github Pages **masih menggunakan kode lama**.
+- Hanya Channel ID publik yang boleh disimpan di dashboard; jangan taruh Write API Key ThingSpeak di repository publik.
