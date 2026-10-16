@@ -666,7 +666,7 @@
           const id = this.cloudChannel.trim();
           if (!/^\d+$/.test(id)) throw new Error('Channel ID tidak valid');
           const count = initial ? 1500 : 100;
-          const url = `https://api.thingspeak.com/channels/${id}/feeds.json?results=${count}&days=3`;
+          const url = `https://api.thingspeak.com/channels/${id}/feeds.json?results=${count}&days=3&status=true`;
           const res = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
           if (!res.ok) throw new Error('HTTP ' + res.status);
           const json = await res.json();
