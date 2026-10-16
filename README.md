@@ -18,3 +18,11 @@ Pada menu **Riwayat CSV** sekarang tersedia:
 3. **Pilih berkas CSV:** buka file dari komputer untuk memvisualisasikannya. Parser dashboard saat ini mengenali format CSV SPIFFS; CSV ekspor ThingSpeak memiliki struktur berbeda sehingga untuk visualisasi gunakan menu Monitoring Online.
 
 **Tidak ada perubahan pada firmware**, server RnD BiruLangit, komunikasi ThingSpeak, tiga mode dashboard, maupun penyimpanan SPIFFS. Akses unduh ESP32 lokal belum menggunakan autentikasi, maka jangan meneruskan port 80 router ke internet. Jangan masukkan Write API Key di GitHub Pages.
+
+
+## Pembaruan parser CSV ThingSpeak
+- Menu Riwayat CSV > Pilih berkas CSV kini menerima hasil ekspor `feeds.csv` ThingSpeak (`created_at`, `field1`...`field8`, `status`).
+- Kolom waktu UTC pada CSV ThingSpeak diubah untuk tampilan WIB (+7 jam), sesuai mode cloud.
+- Field 5–8 dipakai sebagai flag validasi, status `H1` dipakai untuk garis rerata jam jika tersedia.
+- Format SPIFFS `mYYYYMMDD.csv` dan `hYYYYMMDD.csv` tetap didukung.
+- Firmware ESP32 tidak perlu diubah; unggah isi folder dashboard ini ke root repository GitHub Pages.
